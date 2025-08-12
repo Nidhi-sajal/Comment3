@@ -1,0 +1,181 @@
+{
+  "project_name": "Automated Social Media Comment Responder - Frontend",
+  "tech_stack": {
+    "framework": "Next.js 14 with App Router",
+    "styling": ["Tailwind CSS", "Framer Motion for animations", "Heroicons for icons"],
+    "auth": "Clerk.js frontend SDK",
+    "state_management": "React useState/useEffect + Context API",
+    "build_tools": ["Vite (if needed)", "ESLint", "Prettier"]
+  },
+  "global_design": {
+    "color_palette": {
+      "primary": "#ff4500",
+      "secondary": "#0a66c2",
+      "accent": "#facc15",
+      "background_light": "#f9fafb",
+      "background_dark": "#111827",
+      "text_primary": "#111827",
+      "text_secondary": "#6b7280"
+    },
+    "typography": {
+      "font_family": "'Inter', sans-serif",
+      "heading_weight": "700",
+      "body_weight": "400",
+      "line_height": "1.6"
+    },
+    "spacing": "8px base spacing scale",
+    "border_radius": "0.75rem",
+    "shadows": {
+      "soft": "0 2px 8px rgba(0,0,0,0.05)",
+      "medium": "0 4px 12px rgba(0,0,0,0.1)",
+      "large": "0 10px 20px rgba(0,0,0,0.15)"
+    }
+  },
+  "pages": [
+    {
+      "name": "Landing Page",
+      "route": "/",
+      "sections": [
+        {
+          "type": "navbar",
+          "components": [
+            { "logo": "SVG brand logo left aligned" },
+            { "menu_links": ["Features", "Pricing", "Dashboard", "Login"] },
+            { "cta_button": "Get Instant Access", "style": "primary" }
+          ],
+          "animation": "fadeInDown",
+          "sticky": true
+        },
+        {
+          "type": "hero_section",
+          "layout": "two_column",
+          "left_column": {
+            "heading": "Grow on Reddit & LinkedIn without getting suspended",
+            "subheading": "Build your brand — with our AI-powered automation & safe growth roadmap.",
+            "cta_primary": "Get Instant Access",
+            "cta_secondary": "Learn More"
+          },
+          "right_column": {
+            "graphic": "3D floating social media icons animation (Reddit, LinkedIn, Instagram, X)",
+            "animation": "floating_tilt_effect"
+          },
+          "background": "gradient_light",
+          "animation": "fadeIn"
+        },
+        {
+          "type": "features_section",
+          "cards": [
+            {
+              "icon": "Heroicons ChatBubbleLeftRight",
+              "title": "AI Comment Replies",
+              "description": "Engage instantly with smart, human-like responses."
+            },
+            {
+              "icon": "Heroicons Clock",
+              "title": "Save Hours Daily",
+              "description": "No more drowning in repetitive replies."
+            },
+            {
+              "icon": "Heroicons ShieldCheck",
+              "title": "Safe Growth",
+              "description": "Avoid spam flags with natural variation."
+            }
+          ],
+          "grid_layout": "3_columns",
+          "animation": "fadeInUp staggered"
+        },
+        {
+          "type": "social_proof",
+          "elements": [
+            { "text": "Loved by 115+ creators", "stars": 5, "avatars": "row of 5 user avatars" }
+          ],
+          "background": "white"
+        },
+        {
+          "type": "footer",
+          "columns": [
+            { "title": "Product", "links": ["Features", "Pricing", "Roadmap"] },
+            { "title": "Company", "links": ["About", "Careers", "Contact"] },
+            { "title": "Legal", "links": ["Privacy Policy", "Terms of Service"] }
+          ],
+          "bottom_text": "© 2025 Your Company Name. All rights reserved."
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "route": "/dashboard",
+      "auth_protected": true,
+      "layout": "sidebar_with_topbar",
+      "sidebar": {
+        "logo": "small brand icon",
+        "menu_items": [
+          { "icon": "Heroicons Home", "label": "Overview" },
+          { "icon": "Heroicons PlusCircle", "label": "Connect Accounts" },
+          { "icon": "Heroicons ChatBubbleOvalLeft", "label": "Manage Intents" },
+          { "icon": "Heroicons Cog", "label": "Settings" }
+        ],
+        "style": "dark"
+      },
+      "topbar": {
+        "search_bar": true,
+        "user_menu": { "avatar": true, "dropdown_links": ["Profile", "Logout"] }
+      },
+      "main_sections": [
+        {
+          "type": "account_connections",
+          "heading": "Connect Your Social Media",
+          "description": "Link Instagram, Reddit, and X to enable automated replies.",
+          "cards": [
+            {
+              "platform": "Instagram",
+              "status": "not_connected",
+              "button": "Connect",
+              "animation": "pulse_on_hover"
+            },
+            {
+              "platform": "Reddit",
+              "status": "connected",
+              "button": "Reconnect"
+            },
+            {
+              "platform": "X",
+              "status": "not_connected",
+              "button": "Connect"
+            }
+          ]
+        },
+        {
+          "type": "post_overview",
+          "heading": "Recent Posts & Comments",
+          "data_table": {
+            "columns": ["Platform", "Post Preview", "Comments", "AI Reply Status", "Actions"],
+            "sample_data": [
+              ["Reddit", "Post about product launch", "57 comments", "45 replied", "View"]
+            ]
+          },
+          "animation": "fadeIn"
+        }
+      ]
+    }
+  ],
+  "animations": {
+    "fadeIn": "opacity from 0 to 1 in 0.5s ease-in",
+    "fadeInDown": "opacity 0 to 1, translateY -20px to 0",
+    "fadeInUp": "opacity 0 to 1, translateY 20px to 0",
+    "staggered": "delay each child by 0.1s",
+    "floating_tilt_effect": "CSS transform rotate + translate, yoyo infinite"
+  },
+  "responsive_design": {
+    "breakpoints": {
+      "mobile": "<640px",
+      "tablet": "641px - 1024px",
+      "desktop": "1025px+"
+    },
+    "mobile_behavior": {
+      "navbar": "hamburger menu",
+      "sidebar": "collapsible",
+      "cards": "stacked vertically"
+    }
+  }
+}

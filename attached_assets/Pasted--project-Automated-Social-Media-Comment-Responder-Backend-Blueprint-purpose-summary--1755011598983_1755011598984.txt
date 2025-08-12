@@ -1,0 +1,490 @@
+{
+  "project": "Automated Social Media Comment Responder - Backend Blueprint",
+  "purpose_summary": "Reliable server-side system to manage integrations (Instagram/Reddit/X), detect posts, generate AI-driven comment suggestions (Gemini), and post replies safely with audit, approval, and automation controls.",
+  "recommended_tech_stack": {
+    "language": "TypeScript (Node.js)",
+    "web_framework": "Fastify or FastAPI (Node.js + TypeScript recommended: Fastify + TypeScript)",
+    "orm": "Prisma (Postgres)",
+    "database": "Postgres (managed: Supabase / RDS)",
+    "cache": "Redis (for rate limits, locks, queues)",
+    "queue": "BullMQ (Redis) or RabbitMQ",
+    "workers": "Dedicated worker processes (Docker) for AI generation and posting",
+    "object_storage": "S3-compatible (AWS S3 / DigitalOcean Spaces) for media",
+    "secrets": "Vault / AWS Secrets Manager / environment variables",
+    "observability": "Sentry (errors), Prometheus + Grafana (metrics), ELK or Datadog (logs)",
+    "CI_CD": "GitHub Actions",
+    "infrastructure": "Cloud Run / ECS / Kubernetes or Heroku (small scale)",
+    "deployment_frontend": "Vercel / Netlify (frontend)",
+    "auth_provider": "Clerk (frontend) + server-side verification of JWTs",
+    "ai_provider": "Gemini API (or OpenAI) - calls performed from worker plane",
+    "billing": "Stripe (subscriptions, metered usage)"
+  },
+
+  "high_level_architecture": {
+    "components": {
+      "api_server": "Fastify-based TypeScript server handling user requests, OAuth callbacks, public webhooks, internal API for frontend",
+      "worker_pool": "Worker processes consuming job queue for AI tasks & outbound posting",
+      "scheduler": "Cron or scheduler service for periodic polling (Reddit) and token refresh",
+      "webhooks": "Public endpoints to receive platform push events (Instagram via Meta webhooks). If platform has no webhooks, scheduler/poller will be used.",
+      "db": "Postgres for relational data (users, integrations, posts, intents, suggestions, activity)",
+      "cache_and_locks": "Redis for rate-limiting, idempotency, distributed locks",
+      "queue": "BullMQ for job orchestration: ai.generate, post.send, retry jobs",
+      "object_store": "S3 for any media fetched from posts",
+      "monitoring": "Sentry + Prometheus",
+      "billing_service": "Stripe webhook handler to enable/disable features based on subscription"
+    },
+    "request_flow_example": [
+      "1) User clicks 'Connect Reddit' in dashboard -> frontend redirects to /oauth/reddit/start",
+      "2) API server creates state, stores temp session, redirects user to Reddit OAuth URL",
+      "3) User authorizes -> Reddit calls /oauth/reddit/callback -> server exchanges code for tokens -> create Integration record in DB",
+      "4) User selects a post -> clicks 'AI Assist' -> frontend calls /api/posts/:id/suggest -> api_server enqueues ai.generate job and returns suggestion_id",
+      "5) Worker consumes ai.generate job -> calls Gemini -> stores Suggestion in DB -> emits websocket/event for frontend",
+      "6) User approves suggestion -> frontend calls /api/suggestions/:id/approve -> server enqueues post.send job",
+      "7) Worker pulls post.send job, checks rate limits & subscription, posts comment using the platform's API, updates ActivityLog and Suggestion state"
+    ]
+  },
+
+  "database_schema": {
+    "tables": {
+      "users": {
+        "columns": {
+          "id": "uuid PK",
+          "email": "string unique",
+          "name": "string",
+          "clerk_id": "string (optional)",
+          "created_at": "timestamp",
+          "updated_at": "timestamp"
+        }
+      },
+      "teams": {
+        "columns": {
+          "id": "uuid PK",
+          "owner_user_id": "uuid FK -> users.id",
+          "name": "string",
+          "created_at": "timestamp"
+        }
+      },
+      "team_members": {
+        "columns": {
+          "id": "uuid PK",
+          "team_id": "uuid FK -> teams.id",
+          "user_id": "uuid FK -> users.id",
+          "role": "enum (admin, editor, viewer)",
+          "invited_at": "timestamp",
+          "accepted_at": "timestamp"
+        }
+      },
+      "integrations": {
+        "columns": {
+          "id": "uuid PK",
+          "team_id": "uuid FK -> teams.id",
+          "platform": "enum ('reddit','instagram','x')",
+          "platform_account_id": "string (platform user id)",
+          "display_name": "string",
+          "access_token": "encrypted text",
+          "refresh_token": "encrypted text (nullable)",
+          "scopes": "json",
+          "expires_at": "timestamp nullable",
+          "meta": "json (raw profile / account metadata)",
+          "created_at": "timestamp",
+          "updated_at": "timestamp"
+        },
+        "indexes": ["team_id", "platform", "platform_account_id"]
+      },
+      "posts": {
+        "columns": {
+          "id": "uuid PK",
+          "integration_id": "uuid FK -> integrations.id",
+          "platform_post_id": "string",
+          "platform": "enum",
+          "author_platform_id": "string",
+          "title": "text nullable",
+          "body": "text nullable",
+          "media": "json array",
+          "fetched_at": "timestamp",
+          "created_at": "timestamp"
+        },
+        "indexes": ["integration_id", "platform_post_id"]
+      },
+      "comments": {
+        "columns": {
+          "id": "uuid PK",
+          "post_id": "uuid FK -> posts.id",
+          "platform_comment_id": "string nullable",
+          "author_handle": "string",
+          "text": "text",
+          "metadata": "json",
+          "created_at": "timestamp",
+          "fetched_at": "timestamp"
+        }
+      },
+      "intents": {
+        "columns": {
+          "id": "uuid PK",
+          "team_id": "uuid FK -> teams.id",
+          "name": "string",
+          "tone": "enum('friendly','formal','witty','neutral')",
+          "confidence_threshold": "float (0-1)",
+          "brand_voice": "text nullable",
+          "created_at": "timestamp",
+          "updated_at": "timestamp"
+        },
+        "indexes": ["team_id", "name"]
+      },
+      "intent_variations": {
+        "columns": {
+          "id": "uuid PK",
+          "intent_id": "uuid FK -> intents.id",
+          "text": "text (max 280 chars suggestion)",
+          "weight": "int default 10",
+          "enabled": "boolean default true",
+          "created_at": "timestamp"
+        }
+      },
+      "suggestions": {
+        "columns": {
+          "id": "uuid PK",
+          "post_id": "uuid FK -> posts.id",
+          "generated_by": "string ('ai'|'template')",
+          "intent_id": "uuid nullable",
+          "text": "text",
+          "tone": "string",
+          "confidence": "float",
+          "status": "enum('pending','approved','rejected','posted','failed')",
+          "worker_logs": "json nullable",
+          "created_at": "timestamp",
+          "approved_by": "uuid FK -> users.id nullable",
+          "approved_at": "timestamp nullable"
+        },
+        "indexes": ["post_id", "status"]
+      },
+      "activity_logs": {
+        "columns": {
+          "id": "uuid PK",
+          "team_id": "uuid FK -> teams.id",
+          "actor_user_id": "uuid FK -> users.id nullable",
+          "type": "string (e.g., 'suggestion_generated','reply_posted')",
+          "payload": "json (raw response / request payloads)",
+          "created_at": "timestamp"
+        },
+        "indexes": ["team_id", "actor_user_id", "type"]
+      },
+      "billing_subscriptions": {
+        "columns": {
+          "id": "uuid PK",
+          "team_id": "uuid FK -> teams.id",
+          "stripe_customer_id": "string",
+          "stripe_subscription_id": "string",
+          "plan": "string",
+          "status": "string",
+          "created_at": "timestamp",
+          "updated_at": "timestamp"
+        }
+      },
+      "webhook_events": {
+        "columns": {
+          "id": "uuid PK",
+          "integration_id": "uuid FK -> integrations.id nullable",
+          "platform": "string",
+          "event_type": "string",
+          "raw_payload": "json",
+          "verified": "boolean",
+          "received_at": "timestamp"
+        }
+      }
+    }
+  },
+
+  "api_endpoints": {
+    "auth": {
+      "note": "Clerk handles frontend auth and issues JWT. Server must verify Clerk JWT on protected APIs.",
+      "verify_header": "Authorization: Bearer <clerk_jwt>",
+      "example": "GET /api/auth/verify -> returns current user profile (server verifies Clerk token)"
+    },
+    "integration_oauth": [
+      {
+        "name": "Start OAuth (platform)",
+        "method": "GET",
+        "path": "/api/integrations/:platform/oauth/start",
+        "auth": "Clerk JWT (user context required)",
+        "desc": "Creates state, stores temp session, returns redirect URL to platform's OAuth consent page",
+        "response": "{ \"redirect_url\": \"https://...\" }"
+      },
+      {
+        "name": "OAuth Callback (platform)",
+        "method": "GET",
+        "path": "/api/integrations/:platform/oauth/callback",
+        "auth": "public (platform will call with code/state)",
+        "desc": "Exchange code for tokens, create Integration record (encrypted tokens), respond with UI redirect",
+        "success_action": "Redirect to frontend /dashboard?integration=connected"
+      },
+      {
+        "name": "Reconnect / Refresh Tokens",
+        "method": "POST",
+        "path": "/api/integrations/:id/refresh",
+        "auth": "Clerk JWT",
+        "desc": "Force-refresh the access_token using stored refresh_token"
+      }
+    ],
+    "posts_and_comments": [
+      {
+        "name": "Fetch posts (team)",
+        "method": "GET",
+        "path": "/api/teams/:teamId/posts?platform=reddit|instagram|x",
+        "auth": "Clerk JWT",
+        "desc": "Return recent posts cached in DB; if missing, queue a fetch job"
+      },
+      {
+        "name": "Request AI suggestions",
+        "method": "POST",
+        "path": "/api/posts/:postId/suggestions",
+        "auth": "Clerk JWT",
+        "body": "{ \"intent_id\": \"uuid (optional)\", \"mode\": \"draft|fast\" }",
+        "desc": "Create a Suggestion record with status 'pending', enqueue ai.generate job and return {suggestion_id}"
+      },
+      {
+        "name": "Approve suggestion (post comment)",
+        "method": "POST",
+        "path": "/api/suggestions/:id/approve",
+        "auth": "Clerk JWT",
+        "body": "{ \"auto_post\": true | false }",
+        "desc": "If auto_post true, enqueue post.send job; otherwise mark approved"
+      },
+      {
+        "name": "Post comment directly (developer/test)",
+        "method": "POST",
+        "path": "/api/posts/:postId/post-comment",
+        "auth": "Clerk JWT",
+        "body": "{ \"text\": \"string\" }",
+        "desc": "Post a comment as the connected integration (checks subscription & rate limit)"
+      }
+    ],
+    "webhooks": [
+      {
+        "name": "Instagram (Meta) webhook",
+        "method": "POST",
+        "path": "/api/webhooks/meta/instagram",
+        "auth": "public",
+        "desc": "Verify X-Hub-Signature-256 signature. Process 'comments' and 'mentions' if included. Enqueue post-processing job.",
+        "security": "Compare HMAC-SHA256 of payload with app secret (see references)."
+      },
+      {
+        "name": "Stripe webhook",
+        "method": "POST",
+        "path": "/api/webhooks/stripe",
+        "auth": "public",
+        "desc": "Handle invoice.paid, customer.subscription.updated, etc. Update billing_subscriptions table."
+      },
+      {
+        "name": "Generic health endpoint",
+        "method": "GET",
+        "path": "/api/health",
+        "auth": "none",
+        "desc": "Return 200 OK for uptime checks"
+      }
+    ]
+  },
+
+  "oauth_flow_details": {
+    "general_principles": [
+      "Use standard OAuth2 Authorization Code flow with PKCE for native / SPA if possible.",
+      "Always send a unique, single-use 'state' parameter and store server-side for CSRF protection.",
+      "Store refresh_token encrypted. Only store access_token if required for immediate calls; use refresh flow when expired."
+    ],
+    "reddit": {
+      "scopes": ["read", "identity", "submit", "history", "mysubreddits (optional)"],
+      "authorization_url": "https://www.reddit.com/api/v1/authorize (or dev endpoint)",
+      "token_url": "https://www.reddit.com/api/v1/access_token",
+      "notes": "Reddit supports OAuth2 standard scopes; you must declare requested scopes and justify them in your developer app. Reddit does not provide push webhooks (use polling).",
+      "source_doc": "Reddit OAuth & scopes documentation"
+    },
+    "instagram_meta": {
+      "scopes_permissions": ["instagram_basic", "instagram_manage_comments", "pages_show_list", "pages_read_engagement"],
+      "authorization_url": "https://www.facebook.com/v{api_version}/dialog/oauth",
+      "token_url": "https://graph.facebook.com/v{api_version}/oauth/access_token",
+      "notes": "Instagram comment create/delete requires instagram_manage_comments and relevant Page linking. Use Meta webhooks to receive comment events.",
+      "source_doc": "Instagram Graph API comments & webhooks docs"
+    },
+    "x_twitter": {
+      "scopes": ["tweet.read", "tweet.write", "users.read", "offline.access"],
+      "authorization_url": "https://twitter.com/i/oauth2/authorize (or X developer flow)",
+      "token_url": "https://api.twitter.com/2/oauth2/token",
+      "notes": "X/Twitter API supports creating tweets/replies via POST tweets endpoints. Verify per-account access plan and rate limits.",
+      "source_doc": "X developer docs for posting tweets"
+    }
+  },
+
+  "worker_design_and_jobs": {
+    "job_types": {
+      "ai.generate": {
+        "description": "Generate suggestion(s) for a post using AI; includes intent matching and multiple variations",
+        "retry_policy": "exponential backoff (5 retries)",
+        "timeout_seconds": 30,
+        "payload": "{ postId, intentId (optional), teamId, userId, requestMetadata }"
+      },
+      "post.send": {
+        "description": "Send approved comment to platform; check quotas, check moderation filters, perform posting API call, store result",
+        "retry_policy": "strong backoff for HTTP 5xx, mark failed for 4xx except rate-limit and transient",
+        "idempotency_key": "suggestion.id + platform",
+        "payload": "{ suggestionId }"
+      },
+      "integration.poll": {
+        "description": "Periodic job for platforms without webhooks (Reddit). Polls user's recent posts and inserts new posts into DB",
+        "schedule": "every 1-5 minutes per integration (configurable, respect rate limits)"
+      },
+      "token.refresh": {
+        "description": "Refresh expired tokens using stored refresh_token",
+        "schedule": "every hour or when 401 returned"
+      }
+    },
+    "worker_concerns": [
+      "Keep AI calls in worker plane (not in request-response path) to avoid long HTTP waits.",
+      "Workers must validate subscription status before posting (billing check).",
+      "Use distributed locks to ensure only one worker posts a particular suggestion (idempotency).",
+      "Log raw responses from platform APIs for troubleshooting in activity_logs table."
+    ]
+  },
+
+  "rate_limits_and_throttling": {
+    "global_app_limits": "Enforce per-team & global rate-limits to avoid being flagged (example default: 100 automated replies per day per team; configurable).",
+    "platform_specific": {
+      "reddit": "Respect reddit rate limits and rules; implement per-integration pacing.",
+      "instagram": "Respect Graph API rate limits per app and per user. Use exponential backoff on 429.",
+      "x": "Respect X API quotas (per-account plans)."
+    },
+    "implementation": "Use Redis token-bucket algorithm and BullMQ rate limits for scheduled tasks"
+  },
+
+  "safety_and_moderation": {
+    "pre-post_checks": [
+      "Toxicity filter (use a small classifier or AI safety endpoint) to prevent posting abusive content.",
+      "Link safety: validate that links are allowed and not blacklisted.",
+      "Spam heuristics: check if suggestion highly similar to previously posted text in short time window.",
+      "Per-team daily caps for auto-posting to limit abuse."
+    ],
+    "post_checks": [
+      "Monitor for reports / soft-failures from APIs and pause automation for that integration if >N failures in 1 hour."
+    ]
+  },
+
+  "security_practices": {
+    "secrets_storage": "Encrypt access_token & refresh_token at rest using KMS / Secrets Manager",
+    "webhook_verification": "For Meta/Instagram webhooks verify X-Hub-Signature-256 HMAC using app secret before processing (see references).",
+    "input_sanitization": "Sanitize any user-editable content before storing to avoid XSS in dashboard.",
+    "least_privilege": "Request minimal scopes required for functionality; document purpose for each scope in OAuth app submission."
+  },
+
+  "logging_observability": {
+    "error_tracking": "Sentry for full stack exceptions",
+    "metrics": "Expose Prometheus metrics: ai_jobs_total, post_send_success_total, post_send_fail_total, queue_length",
+    "structured_logging": "JSON structured logs with request_id for tracing",
+    "audit_logs": "Persist raw platform API requests/responses for 90 days (or as required by privacy rules) in activity_logs"
+  },
+
+  "data_retention_and_privacy": {
+    "gdpr_rights": "Support data export & delete for users (delete all integration tokens & user data on request)",
+    "retention_policy": "Keep full logs for 90 days default; allow teams to configure retention",
+    "pii_handling": "Avoid storing third-party user PII unnecessarily; store only identifiers required for posting",
+    "privacy_policy_requirements": "Document how tokens are used & how long data is stored"
+  },
+
+  "billing_and_feature_gating": {
+    "stripe": {
+      "flow": "Use Stripe subscriptions; store stripe_customer_id and subscription id. Use webhooks to update subscription status.",
+      "gating": "Guard auto-posting & high-volume features behind paid plans; free tier limited to manual suggestions and small monthly auto-post quota."
+    },
+    "metering": "Optionally meter by number of auto-posts or AI tokens used; track usage in DB for billing reconciliation"
+  },
+
+  "testing_and_staging": {
+    "sandbox_accounts": "Maintain test accounts per platform for E2E testing. Instagram requires Business accounts for Graph API testing.",
+    "integration_tests": "Use Playwright/Cypress for UI + mocked backend, and live E2E tests against sandbox accounts",
+    "contract_tests": "Mock platform API responses to test edge cases (rate limit, 403, 429, 5xx)."
+  },
+
+  "ci_cd_and_deployment": {
+    "ci": "Github Actions: lint -> unit tests -> build -> integration tests -> deploy to staging",
+    "migrations": "Prisma migrations applied during deployment (use rollout flags)",
+    "secrets": "Use repository environment secrets & cloud secret manager"
+  },
+
+  "recommended_env_variables": {
+    "SERVER": {
+      "PORT": "3000",
+      "NODE_ENV": "production",
+      "DATABASE_URL": "postgres://user:pass@host:5432/db",
+      "REDIS_URL": "redis://:password@host:6379",
+      "S3_BUCKET": "s3://bucket",
+      "SENTRY_DSN": "https://xxxxx@sentry.io/0000",
+      "STRIPE_SECRET_KEY": "sk_live_xxx",
+      "GEMINI_API_KEY": "gx_xxx",
+      "CLERK_API_KEY": "clerk_xxx",
+      "JWT_PUBLIC_KEY": "clerk_jwt_public",
+      "META_APP_ID": "facebook_app_id",
+      "META_APP_SECRET": "facebook_app_secret",
+      "REDIRECT_BASE": "https://app.yourdomain.com",
+      "RATE_LIMIT_DEFAULT": "100",
+      "WEBHOOK_SECRET_META": "meta_webhook_secret"
+    }
+  },
+
+  "sample_sql_migrations": [
+    "-- Prisma style migrations or SQL examples",
+    "CREATE TABLE users (id UUID PRIMARY KEY, email TEXT UNIQUE, name TEXT, clerk_id TEXT, created_at TIMESTAMP DEFAULT now());",
+    "CREATE TABLE integrations (id UUID PRIMARY KEY, team_id UUID, platform TEXT, platform_account_id TEXT, access_token TEXT, refresh_token TEXT, scopes JSON, expires_at TIMESTAMP, meta JSON, created_at TIMESTAMP DEFAULT now());",
+    "CREATE INDEX ON integrations(team_id);"
+  ],
+
+  "sample_api_spec_examples": {
+    "POST /api/integrations/reddit/oauth/start": {
+      "headers": { "Authorization": "Bearer <Clerk JWT>" },
+      "response": {
+        "redirect_url": "https://www.reddit.com/api/v1/authorize?client_id=xxx&response_type=code&state=...&duration=permanent&scope=read+submit+identity"
+      }
+    },
+    "GET /api/integrations/reddit/oauth/callback?code=xxx&state=yyy": {
+      "action": "Exchange code for token at Reddit token endpoint, store encrypted tokens, create integration record, redirect to /dashboard?connected=reddit"
+    },
+    "POST /api/posts/:postId/suggestions": {
+      "body": "{ \"intentId\": \"uuid|null\" }",
+      "response": "{ \"suggestionId\": \"uuid\", \"status\": \"pending\" }"
+    },
+    "POST /api/suggestions/:id/approve": {
+      "body": "{ \"autoPost\": true }",
+      "response": "{ \"jobId\": \"bullmq_job_id\" }"
+    }
+  },
+
+  "operational_checklist_before_launch": [
+    "1) Create OAuth apps for Reddit, Meta (Instagram), and X with exact redirect URIs.",
+    "2) Populate production secrets in secret manager and test token flows end-to-end.",
+    "3) Create staging test accounts and run full E2E tests for post/comment flows.",
+    "4) Implement HMAC verification for incoming Meta/Instagram webhooks.",
+    "5) Implement rate-limits and safety filters before enabling any auto-posting feature.",
+    "6) Create Stripe plans and connect subscription gating to auto-post APIs.",
+    "7) Create an incident response runbook (pause automation, rotate tokens) for platform bans."
+  ],
+
+  "appendix_references": [
+    {
+      "note": "Reddit OAuth and scopes (read/submit/identity) - use to request correct scopes and build OAuth flow",
+      "web.run_ref": "turn0search0"
+    },
+    {
+      "note": "Instagram Graph API comment replies & permissions (instagram_manage_comments required for create/delete replies)",
+      "web.run_ref": "turn0search6"
+    },
+    {
+      "note": "Instagram / Meta Webhooks guide (how to receive and subscribe to comment events)",
+      "web.run_ref": "turn0search4"
+    },
+    {
+      "note": "Meta Webhooks signature verification best practice (X-Hub-Signature-256 / HMAC verification)",
+      "web.run_ref": "turn0search9"
+    },
+    {
+      "note": "X (Twitter) API doc for creating posts (POST tweets endpoints & developer info)",
+      "web.run_ref": "turn0search7"
+    }
+  ]
+}
