@@ -22,6 +22,7 @@ function Router() {
       <Route path="/" component={Landing} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/auth" component={Auth} />
+      <Route path="/auth/*" component={Auth} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -91,9 +91,11 @@ export default function Landing() {
             
             {/* CTA Button */}
             <div className="hidden md:block">
-              <Button className="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300" data-testid="button-get-access">
-                Get Instant Access
-              </Button>
+              <Link href="/auth">
+                <Button className="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-xl font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300" data-testid="button-get-access">
+                  Get Instant Access
+                </Button>
+              </Link>
             </div>
             
             {/* Mobile menu button */}
@@ -121,9 +123,11 @@ export default function Landing() {
               <a href="#pricing" className="text-text-secondary hover:text-primary block px-3 py-2 text-base font-medium">Pricing</a>
               <Link href="/dashboard" className="text-text-secondary hover:text-primary block px-3 py-2 text-base font-medium">Dashboard</Link>
               <Link href="/auth" className="text-text-secondary hover:text-primary block px-3 py-2 text-base font-medium">Login</Link>
-              <Button className="w-full mt-4 bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-xl font-semibold">
-                Get Instant Access
-              </Button>
+              <Link href="/auth">
+                <Button className="w-full mt-4 bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-xl font-semibold">
+                  Get Instant Access
+                </Button>
+              </Link>
             </div>
           </motion.div>
         )}
@@ -151,9 +155,11 @@ export default function Landing() {
                 Build your brand — with our AI-powered automation & safe growth roadmap.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-                <Button className="bg-primary hover:bg-primary/90 text-white px-8 py-4 rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300" data-testid="button-get-instant-access">
-                  Get Instant Access
-                </Button>
+                <Link href="/auth">
+                  <Button className="bg-primary hover:bg-primary/90 text-white px-8 py-4 rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300" data-testid="button-get-instant-access">
+                    Get Instant Access
+                  </Button>
+                </Link>
                 <Button variant="outline" className="border-2 border-text-secondary hover:border-primary text-text-secondary hover:text-primary px-8 py-4 rounded-xl font-semibold text-lg transition-all duration-300" data-testid="button-learn-more">
                   Learn More
                 </Button>
